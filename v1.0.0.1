@@ -1,0 +1,286 @@
+pragma solidity ^0.8.17;
+
+// The ERC20 interface that this contract will implement
+interface ERC20 {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function transferOwnership(address newOwner) external;
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+}
+
+// This contract implements the ERC20 interface and has a finite supply of 7000000000 tokens
+contract Token is ERC20 {
+    // The name of the token
+    string public name = "Token";
+    // The symbol of the token
+    string public symbol = "TKN";
+    // The number of decimal places of the token
+    uint8 public decimals = 18;
+    // The total supply of the token
+    uint256 public totalSupply = 7000000000 * 10 ** uint256(decimals);
+    // The current owner of the contract
+    address public owner;
+
+    // Mapping from addresses to their token balances
+    mapping(address => uint256) public balances;
+    // Mapping from addresses to the amount of tokens they have allowed other addresses to spend
+    mapping(address => mapping(address => uint256)) public allowed;
+
+    // Whitelist of addresses that are exempt from being charged the 6% fee
+    address[] public whitelist;
+    // Blacklist of addresses that are blocked from moving their tokens
+    address[] public blacklist;
+    // Transfer limit for the token that applies to all addresses excluding the Whitelist addresses
+    uint256 public transferLimit;
+
+    // Marketing wallet address
+    address public marketingWallet;
+    // Liquidity wallet address
+    address public liquidityWallet;
+
+    // Constructor function that sets the initial owner of the contract
+    constructor() public {
+        owner = msg.sender;
+    }
+
+    // Function to check if an address is on the whitelist
+    function isWhitelisted(address account) public view returns (bool) {
+        for (uint256 i = 0; i < whitelist.length; i++) {
+            if (whitelist[i] == account) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Function to check if an address is on the blacklist
+    function isBlacklisted(address account) public view returns (bool) {
+        for (uint256 i = 0; i < blacklist.length; i++) {
+            if (blacklist[i] == account) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Function to add an address to the whitelist
+    function addToWhitelist(addressaccount) public {
+require(msg.sender == owner, "Only the contract owner can modify the whitelist.");
+require(!isWhitelisted(account), "The specified address is already on the whitelist.");
+require(!isBlacklisted(account), "The specified address is on the blacklist and cannot be added to the whitelist.");
+whitelist.push(account);
+}
+// Function to remove an address from the whitelist
+function removeFromWhitelist(address account) public {
+    require(msg.sender == owner, "Only the contract owner can modify the whitelist.");
+    require(isWhitelisted(account), "The specified address is not on the whitelist.");
+    for (uint256 i = 0; i < whitelist.length; i++) {
+        if (whitelist[i] == account) {
+            delete whitelist[i];
+            whitelist.length--;
+            break;
+        }
+    }
+}
+
+// Function to add an address to the blacklist
+function addToBlacklist(address account) public {
+    require(msg.sender == owner, "Only the contract owner can modify the blacklist.");
+    require(!isBlacklisted(account), "The specified address is already on the blacklist.");
+    require(!isWhitelisted(account), "The specified address is on the whitelist and cannot be added to the blacklist.");
+    blacklist.push(account);
+}
+
+// Function to remove an address from the blacklist
+function removeFromBlacklist(address account) public {
+    require(msg.sender == owner, "Only the contract owner can modify the blacklist.");
+    require(isBlacklisted(account), "The specified address is not on the blacklist.");
+    for (uint256 i = 0; i < blacklist.length; i++) {
+        if (blacklist[i] == account) {
+            delete blacklist[i];
+            blacklist.length--;
+            break;
+        }
+    }
+}
+// Function to set the transfer limit for the token
+function setTransferLimit(uint256 limit) public {
+    require(msg.sender == owner, "Only the contract owner can set the transfer limit.");
+    transferLimit = limit;
+}
+
+// Function to set the marketing wallet address
+function setMarketingWallet(address newMarketingWallet) public {
+    require(msg.sender == owner, "Only the contract owner can set the marketing wallet address.");
+    marketingWallet = newMarketingWallet;
+}
+
+// Function to set the liquidity wallet address
+function setLiquidityWallet(address newLiquidityWallet) public {
+    require(msg.sender == owner, "Only the contract owner can set the liquidity wallet address.");
+    liquidityWallet = newLiquidityWallet;
+}
+
+// Function to transfer tokens from one address to another
+function transfer(address recipient, uint256 amount) public returns (bool) {
+    require(!isBlacklisted(msg.sender), "Your address is on the blacklist and you are not allowed to move your tokens.");
+    require(amount <= balances[msg.sender], "You don't have enough tokens to transfer.");
+    if (!isWhitelisted(msg.sender)) {
+        require(amount <= transferLimit, "The transfer limit has been exceeded.");
+        //deduct 6% fee from the transfer amount
+uint256 fee = amount * 6 / 100;
+// Calculate the amount of tokens that will be transferred after deducting the fee
+uint256 transferAmount = amount - fee;
+// Calculate the amount of tokens that will be redistributed among all token holders
+uint256 redistributionAmount = fee / 3;
+// Calculate the amount of tokens that will be sent to the marketing wallet
+uint256 marketingAmount = redistributionAmount;
+// Calculate the amount of tokens that will be sent to the liquidity wallet
+uint256 liquidityAmount = redistributionAmount;     
+// Redistribute tokens among all token holders
+        for (address account : balances) {
+            uint256 balance = balances[account];
+            if (balance > 0) {
+                uint256 percentage = balance / totalSupply;
+                balances[account] = balance + redistributionAmount * percentage;
+            }
+        }
+        // Send tokens to the marketing wallet
+        marketingWallet.transfer(marketingAmount);
+        // Send tokens to the liquidity wallet
+        liquidityWallet.transfer(liquidityAmount);
+    } else {
+        // No fee is charged for whitelisted addresses
+        transferAmount = amount;
+    }
+    // Transfer the tokens to the recipient
+    balances[msg.sender] = balances[msg.sender] - transferAmount;
+    balances[recipient] = balances[recipient] + transferAmount;
+    emit Transfer(msg.sender, recipient, transferAmount);
+    return true;
+}
+
+// Function to approve another address to spend a certain amount of tokens on behalf of the owner
+function approve(address spender, uint256 amount) public returns (bool) {
+    require(!isBlacklisted(msg.sender), "Your address is on the blacklist and you are not allowed to move your tokens.");
+    require(amount <= balances[msg.sender], "You don't have enough tokens to approve the transfer.");
+    allowed[msg.sender][spender] = amount;
+    emit Approval(msg.sender, spender, amount);
+    return true;
+}
+
+// Function to transfer tokens from one address to another using approval
+function transferFrom(address sender, address recipient, uint256 amount) public returns (bool) {
+    require(!isBlacklisted(sender), "The sender's address is on the blacklist and the tokens cannot be moved.");
+    require(amount <= balances[sender], "The sender doesn't have enough tokens to transfer.");
+    require(amount <= allowed[sender][msg.sender], "You don't have enough approval to transfer the tokens.");
+    if (!isWhitelisted(sender)) {
+        require(amount <= transferLimit, "The transfer limit has been exceeded.");
+        // Deduct 6% fee from the transfer amount
+        uint256 fee = amount * 6 / 100;
+        // Calculate the amount of tokens that will be transferred after deducting the fee
+        uint256 transferAmount = amount - fee;
+        // Calculate the amount of tokens that will be redistributed among all token holders
+        uint256 redistributionAmount = fee / 3;
+        // Calculate the amount of tokens that will be sent to the marketing wallet
+        uint256 marketingAmount = redistributionAmount;
+        // Calculate the amount of tokens that will be sent to the liquidity wallet
+        uint256 liquidityAmount = redistributionAmount;
+        // Redistribute tokens
+		// Calculate the fee for this transfer
+uint256 fee = amount.mul(6).div(100);
+// Deduct the fee from the amount to be transferred
+amount -= fee;
+// Calculate the amount of the fee to be redistributed to all token holders
+uint256 feeRedistributed = fee.div(3);
+// Calculate the amount of the fee to be deposited into the marketing wallet
+uint256 feeMarketing = feeRedistributed;
+// Calculate the amount of the fee to be deposited into the liquidity wallet
+uint256 feeLiquidity = feeRedistributed;
+// Get the total number of tokens held by all addresses
+uint256 totalTokens = totalSupply;
+// Iterate through all addresses holding tokens and redistribute the fee proportionally based on the percentage of the total amount of tokens the address holds
+for (address tokenHolder : addresses(balances)) {
+// Calculate the percentage of the total amount of tokens the current address holds
+uint256 percentage = balances[tokenHolder].mul(100).div(totalTokens);
+// Calculate the amount of the fee to be redistributed to the current address
+uint256 feeToAddress = feeRedistributed.mul(percentage).div(100);
+// Redistribute the fee to the current address
+balances[tokenHolder] += feeToAddress;
+}
+// Deposit the fee into the marketing wallet
+marketingWallet.transfer(feeMarketing);
+// Deposit the fee into the liquidity wallet
+liquidityWallet.transfer(feeLiquidity);
+}
+// Transfer the tokens to the recipient
+balances[msg.sender] -= amount;
+balances[recipient] += amount;
+emit Transfer(msg.sender, recipient, amount);
+return true;
+}
+// Function to transfer tokens from one address to another on behalf of the owner of the tokens
+function transferFrom(address sender, address recipient, uint256 amount) public returns (bool) {
+    require(allowed[sender][msg.sender] >= amount, "You don't have enough allowance to transfer these tokens.");
+    require(amount <= balances[sender], "The sender doesn't have enough tokens to transfer.");
+    if (!isWhitelisted(sender)) {
+        require(amount <= transferLimit, "The transfer limit has been exceeded.");
+        // Calculate the fee for this transfer
+        uint256 fee = amount.mul(6).div(100);
+        // Deduct the fee from the amount to be transferred
+        amount -= fee;
+        // Calculate the amount of the fee to be redistributed to all token holders
+        uint256 feeRedistributed = fee.div(3);
+        // Calculate the amount of the fee to be deposited into the marketing wallet
+        uint256 feeMarketing = feeRedistributed;
+        // Calculate the amount of the fee to be deposited into the liquidity wallet
+        uint256 feeLiquidity = feeRedistributed;
+        // Get the total number of tokens held by all addresses
+        uint256 totalTokens = totalSupply;
+        // Iterate through all addresses holding tokens and redistribute the fee proportionally based on the percentage of the total amount of tokens the address holds
+        for (address tokenHolder : addresses(balances)) {
+            // Calculate the percentage of the total amount of tokens the current address holds
+            uint256 percentage = balances[tokenHolder].mul(100).div(totalTokens);
+// Calculate the amount of the fee to be redistributed to the current address
+uint256 feeToAddress = feeRedistributed.mul(percentage).div(100);
+// Redistribute the fee to the current address
+balances[tokenHolder] += feeToAddress;
+}
+// Deposit the fee into the marketing wallet
+marketingWallet.transfer(feeMarketing);
+// Deposit the fee into the liquidity wallet
+liquidityWallet.transfer(feeLiquidity);
+}
+// Transfer the tokens to the recipient
+balances[sender] -= amount;
+balances[recipient] += amount;
+allowed[sender][msg.sender] -= amount;
+emit Transfer(sender, recipient, amount);
+return true;
+}
+// Function to allow another address to spend a certain amount of tokens on behalf of the owner of the tokens
+function approve(address spender, uint256 amount) public returns (bool) {
+    require(amount <= balances[msg.sender], "You don't have enough tokens to allow spending.");
+    allowed[msg.sender][spender] = amount;
+    emit Approval(msg.sender, spender, amount);
+    return true;
+}
+
+// Function to check the amount of tokens that another address is allowed to spend on behalf of the owner of the tokens
+function allowance(address owner, address spender) public view returns (uint256) {
+    return allowed[owner][spender];
+}
+
+// Function to transfer the ownership of the contract to a new owner
+function transferOwnership(address newOwner) public {
+    require(msg.sender == owner, "Only the current owner can transfer ownership.");
+    require(newOwner != address(0), "The new owner cannot be the zero address.");
+    owner = newOwner;
+    emit OwnershipTransferred(owner, newOwner);
+}
